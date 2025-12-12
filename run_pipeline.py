@@ -1,5 +1,6 @@
 import os
 import sys
+import pandas as pd
 
 # --- DEBUG: show where we are ---
 print("CWD:", os.getcwd())
@@ -40,3 +41,51 @@ print(f"Test accuracy:  {test_acc:.3f}")
 # 5. Get latest signal
 signal = model.predict_latest(df_features)
 print("Latest model signal:", "📈 BUY/LONG" if signal == 1 else "📉 FLAT / NO-LONG")
+
+# --- 6. Simple backtest on test period only ---
+
+import matplotlib.pyplot as plt
+
+# Recreate the same train/test split index
+split_idx = int(len(df_features) * model.train_ratio)
+
+test = df_features.iloc[split_idx:].copy()
+
+# Generate signals on the test set
+test["Signal"] = model.model.predict(test[feature_cols])
+
+# Position applies to the NEXT bar
+test["Position"] = test["Signal"].shift(1).fillna(0)
+
+# Strategy returns: position * actual return
+test["Strategy_Return"] = test["Position"] * test["Return"]
+
+# Equity curves
+test["BuyHold_Equity"] = (1 + test["Return"]).cumprod()
+test["Strategy_Equity"] = (1 + test["Strategy_Return"]).cumprod()
+
+# Simple max drawdown helper
+def max_drawdown(equity: pd.Series) -> float:
+    roll_max = equity.cummax()
+    drawdown = equity / roll_max - 1.0
+    return float(drawdown.min())
+
+buyhold_final = test["BuyHold_Equity"].iloc[-1]
+strategy_final = test["Strategy_Equity"].iloc[-1]
+
+buyhold_dd = max_drawdown(test["BuyHold_Equity"])
+strategy_dd = max_drawdown(test["Strategy_Equity"])
+
+print("\n--- Backtest (test period only) ---")
+print("Buy & Hold final equity: ", round(buyhold_final, 3))
+print("Strategy final equity:   ", round(strategy_final, 3))
+print("Buy & Hold max drawdown: ", f"{buyhold_dd:.1%}")
+print("Strategy max drawdown:   ", f"{strategy_dd:.1%}")
+
+# Plot equity curves
+ax = test[["BuyHold_Equity", "Strategy_Equity"]].plot(
+    title=f"{'AAPL'} – Buy & Hold vs ML Strategy (Test)"
+)
+ax.set_ylabel("Equity (starting at 1.0)")
+plt.show()
+
